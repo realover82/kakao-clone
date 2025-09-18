@@ -240,7 +240,7 @@ def main():
         st.session_state['jig_col_mapping'] = {
             'pcb': 'PcbMaxIrPwr',
             'fw': 'FwPC',
-            'rftx': 'RftxPC',
+            'rftx': 'RfTxPC',
             'semi': 'SemiAssyMaxBatVolt',
             'func': 'BatadcPC',
         }
@@ -357,7 +357,7 @@ def main():
         with tab3:
             st.header("파일 RfTx (RfTx_Process)")
 
-            pc_col_name = 'RftxPC'
+            pc_col_name = 'RfTxPC'
             unique_pc_rftx = df_all_data[pc_col_name].dropna().unique()
             pc_options_rftx = ['모든 PC'] + sorted(list(unique_pc_rftx))
             selected_pc_rftx = st.selectbox("PC (Jig) 선택", pc_options_rftx, key="pc_select_rftx")
