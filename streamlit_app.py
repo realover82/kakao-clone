@@ -365,7 +365,7 @@ def main():
         with tab4:
             st.header("파일 Semi (SemiAssy_Process)")
 
-            unique_pc_semi = df_all_data['SemiAssyPC'].dropna().unique()
+            unique_pc_semi = df_all_data['SemiAssyMaxBatVolt'].dropna().unique()
             pc_options_semi = ['모든 PC'] + sorted(list(unique_pc_semi))
             selected_pc_semi = st.selectbox("PC (Jig) 선택", pc_options_semi, key="pc_select_semi")
 
@@ -383,13 +383,13 @@ def main():
                             (df_all_data['SemiAssyStartTime_dt'].dt.date <= end_date)
                         ].copy()
                         if selected_pc_semi != '모든 PC':
-                            df_filtered = df_filtered[df_filtered['SemiAssyPC'] == selected_pc_semi].copy()
+                            df_filtered = df_filtered[df_filtered['SemiAssyMaxBatVolt'] == selected_pc_semi].copy()
                     else:
                         st.warning("날짜 범위를 올바르게 선택해주세요.")
                         df_filtered = pd.DataFrame()
 
                     st.session_state.analysis_results['semi'] = df_filtered
-                    st.session_state.analysis_data['semi'] = analyze_data(df_filtered, 'SemiAssyStartTime_dt', 'SemiAssyPC')
+                    st.session_state.analysis_data['semi'] = analyze_data(df_filtered, 'SemiAssyStartTime_dt', 'SemiAssyMaxBatVolt')
                     st.session_state.analysis_time['semi'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     st.session_state['last_analyzed_key'] = 'semi'
                 st.success("분석 완료! 결과가 저장되었습니다.")
