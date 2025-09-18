@@ -288,7 +288,7 @@ def main():
         with tab3:
             st.header("파일 RfTx (RfTx_Process)")
 
-            unique_pc_rftx = df_all_data['RftxPC'].dropna().unique()
+            unique_pc_rftx = df_all_data['RfTxPC'].dropna().unique()
             pc_options_rftx = ['모든 PC'] + list(unique_pc_rftx)
             selected_pc_rftx = st.selectbox("PC (Jig) 선택", pc_options_rftx, key="pc_select_rftx")
 
@@ -306,7 +306,7 @@ def main():
                             (df_all_data['RfTxStamp_dt'].dt.date <= end_date)
                         ].copy()
                         if selected_pc_rftx != '모든 PC':
-                            df_filtered = df_filtered[df_filtered['RftxPC'] == selected_pc_rftx].copy()
+                            df_filtered = df_filtered[df_filtered['RfTxPC'] == selected_pc_rftx].copy()
                     else:
                         st.warning("날짜 범위를 올바르게 선택해주세요.")
                         df_filtered = pd.DataFrame()
