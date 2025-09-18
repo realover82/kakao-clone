@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 import sqlite3
-import numpy as np
 import warnings
+import numpy as np
 
 warnings.filterwarnings('ignore')
 
@@ -47,8 +47,8 @@ def analyze_data(df, date_col_name, jig_col_name):
     summary_data = {}
     all_dates = []
 
-    if jig_col_name not in df.columns:
-        st.warning(f"경고: '{jig_col_name}' 필드가 데이터에 없습니다. 'SNumber' 필드로 대체하여 분석합니다.")
+    if jig_col_name not in df.columns or df[jig_col_name].isnull().all():
+        st.warning(f"경고: '{jig_col_name}' 필드가 데이터에 없거나 비어 있습니다. 'SNumber' 필드로 대체하여 분석합니다.")
         jig_col_name = 'SNumber'
 
     if 'SNumber' in df.columns and date_col_name in df.columns and not df[date_col_name].dt.date.dropna().empty:
@@ -79,7 +79,7 @@ def analyze_data(df, date_col_name, jig_col_name):
     
     return summary_data, all_dates
 
-def display_analysis_result(analysis_key, table_name, date_col_name, jig_col_name):
+def display_analysis_result(analysis_key, table_name, date_col_name, jig_col_name, selected_jig):
     if st.session_state.analysis_results[analysis_key].empty:
         st.warning("선택한 날짜에 해당하는 분석 데이터가 없습니다.")
         return
@@ -90,7 +90,7 @@ def display_analysis_result(analysis_key, table_name, date_col_name, jig_col_nam
         st.warning("선택한 날짜에 해당하는 분석 데이터가 없습니다.")
         return
 
-    st.markdown(f"### '{table_name}' 분석 리포트")
+    st.markdown(f"### '{table_name}' 분석 리포트 - {selected_jig}")
     
     kor_date_cols = [f"{d.strftime('%y%m%d')}" for d in all_dates]
     
@@ -99,7 +99,8 @@ def display_analysis_result(analysis_key, table_name, date_col_name, jig_col_nam
 
     all_reports_text = ""
     
-    for jig in sorted(summary_data.keys()):
+    jig = selected_jig
+    if jig in summary_data:
         st.subheader(f"구분: {jig}")
         
         report_data = {
@@ -122,6 +123,8 @@ def display_analysis_result(analysis_key, table_name, date_col_name, jig_col_nam
         report_df = pd.DataFrame(report_data)
         st.table(report_df)
         all_reports_text += report_df.to_csv(index=False) + "\n"
+    else:
+        st.warning("선택된 PC에 대한 분석 데이터가 없습니다.")
     
     st.success("분석 완료! 결과가 저장되었습니다.")
 
@@ -203,7 +206,14 @@ def main():
                     st.success("분석 완료! 결과가 저장되었습니다.")
             
             if st.session_state.analysis_results['pcb'] is not None:
-                display_analysis_result('pcb', 'Pcb_Process', 'PcbStartTime_dt', 'PcbMaxIrPwr')
+                # PC (지그) 목록 버튼 추가
+                jig_col = 'PcbMaxIrPwr' if 'PcbMaxIrPwr' in st.session_state.analysis_results['pcb'].columns else 'SNumber'
+                jigs = sorted(st.session_state.analysis_results['pcb'][jig_col].dropna().unique())
+                if jigs:
+                    selected_jig = st.selectbox("PC(지그) 선택", options=jigs, key="select_jig_pcb")
+                    display_analysis_result('pcb', 'Pcb_Process', 'PcbStartTime_dt', jig_col, selected_jig)
+                else:
+                    st.warning("선택 가능한 PC(지그)가 없습니다.")
 
         with tab2:
             st.header("파일 Fw (Fw_Process)")
@@ -242,7 +252,14 @@ def main():
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
             if st.session_state.analysis_results['fw'] is not None:
-                display_analysis_result('fw', 'Fw_Process', 'FwStamp_dt', 'FwPC')
+                # PC (지그) 목록 버튼 추가
+                jig_col = 'FwPC' if 'FwPC' in st.session_state.analysis_results['fw'].columns else 'SNumber'
+                jigs = sorted(st.session_state.analysis_results['fw'][jig_col].dropna().unique())
+                if jigs:
+                    selected_jig = st.selectbox("PC(지그) 선택", options=jigs, key="select_jig_fw")
+                    display_analysis_result('fw', 'Fw_Process', 'FwStamp_dt', jig_col, selected_jig)
+                else:
+                    st.warning("선택 가능한 PC(지그)가 없습니다.")
 
         with tab3:
             st.header("파일 RfTx (RfTx_Process)")
@@ -281,7 +298,14 @@ def main():
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
             if st.session_state.analysis_results['rftx'] is not None:
-                display_analysis_result('rftx', 'RfTx_Process', 'RfTxStamp_dt', 'RfTxPC')
+                # PC (지그) 목록 버튼 추가
+                jig_col = 'RfTxPC' if 'RfTxPC' in st.session_state.analysis_results['rftx'].columns else 'SNumber'
+                jigs = sorted(st.session_state.analysis_results['rftx'][jig_col].dropna().unique())
+                if jigs:
+                    selected_jig = st.selectbox("PC(지그) 선택", options=jigs, key="select_jig_rftx")
+                    display_analysis_result('rftx', 'RfTx_Process', 'RfTxStamp_dt', jig_col, selected_jig)
+                else:
+                    st.warning("선택 가능한 PC(지그)가 없습니다.")
 
         with tab4:
             st.header("파일 Semi (SemiAssy_Process)")
@@ -320,7 +344,14 @@ def main():
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
             if st.session_state.analysis_results['semi'] is not None:
-                display_analysis_result('semi', 'SemiAssy_Process', 'SemiAssyStartTime_dt', 'SemiAssyMaxBatVolt')
+                # PC (지그) 목록 버튼 추가
+                jig_col = 'SemiAssyMaxBatVolt' if 'SemiAssyMaxBatVolt' in st.session_state.analysis_results['semi'].columns else 'SNumber'
+                jigs = sorted(st.session_state.analysis_results['semi'][jig_col].dropna().unique())
+                if jigs:
+                    selected_jig = st.selectbox("PC(지그) 선택", options=jigs, key="select_jig_semi")
+                    display_analysis_result('semi', 'SemiAssy_Process', 'SemiAssyStartTime_dt', jig_col, selected_jig)
+                else:
+                    st.warning("선택 가능한 PC(지그)가 없습니다.")
 
         with tab5:
             st.header("파일 Func (Func_Process)")
@@ -359,7 +390,14 @@ def main():
                     st.success("분석 완료! 결과가 저장되었습니다.")
             
             if st.session_state.analysis_results['func'] is not None:
-                display_analysis_result('func', 'Func_Process', 'BatadcStamp_dt', 'BatadcPC')
+                # PC (지그) 목록 버튼 추가
+                jig_col = 'BatadcPC' if 'BatadcPC' in st.session_state.analysis_results['func'].columns else 'SNumber'
+                jigs = sorted(st.session_state.analysis_results['func'][jig_col].dropna().unique())
+                if jigs:
+                    selected_jig = st.selectbox("PC(지그) 선택", options=jigs, key="select_jig_func")
+                    display_analysis_result('func', 'Func_Process', 'BatadcStamp_dt', jig_col, selected_jig)
+                else:
+                    st.warning("선택 가능한 PC(지그)가 없습니다.")
 
     except Exception as e:
         st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
