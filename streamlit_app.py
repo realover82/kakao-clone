@@ -224,10 +224,10 @@ def main():
         st.session_state['last_analyzed_key'] = None
     if 'jig_col_mapping' not in st.session_state:
         st.session_state['jig_col_mapping'] = {
-            'pcb': 'PcbPC',
+            'pcb': 'PcbMaxIrPwr',
             'fw': 'FwPC',
             'rftx': 'RfTxPC',
-            'semi': 'SemiAssyPC',
+            'semi': 'SemiAssyMaxBatVolt',
             'func': 'BatadcPC',
         }
     if 'show_line_chart' not in st.session_state:
@@ -257,7 +257,7 @@ def main():
             st.header("파일 PCB (Pcb_Process)")
             
             # PC (Jig) 선택 기능 추가
-            unique_pc_pcb = df_all_data['PcbPC'].dropna().unique()
+            unique_pc_pcb = df_all_data['PcbMaxIrPwr'].dropna().unique()
             pc_options_pcb = ['모든 PC'] + sorted(list(unique_pc_pcb))
             selected_pc_pcb = st.selectbox("PC (Jig) 선택", pc_options_pcb, key="pc_select_pcb")
 
@@ -275,13 +275,13 @@ def main():
                             (df_all_data['PcbStartTime_dt'].dt.date <= end_date)
                         ].copy()
                         if selected_pc_pcb != '모든 PC':
-                            df_filtered = df_filtered[df_filtered['PcbPC'] == selected_pc_pcb].copy()
+                            df_filtered = df_filtered[df_filtered['PcbMaxIrPwr'] == selected_pc_pcb].copy()
                     else:
                         st.warning("날짜 범위를 올바르게 선택해주세요.")
                         df_filtered = pd.DataFrame()
                     
                     st.session_state.analysis_results['pcb'] = df_filtered
-                    st.session_state.analysis_data['pcb'] = analyze_data(df_filtered, 'PcbStartTime_dt', 'PcbPC')
+                    st.session_state.analysis_data['pcb'] = analyze_data(df_filtered, 'PcbStartTime_dt', 'PcbMaxIrPwr')
                     st.session_state.analysis_time['pcb'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     st.session_state['last_analyzed_key'] = 'pcb'
                 st.success("분석 완료! 결과가 저장되었습니다.")
