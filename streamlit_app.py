@@ -176,7 +176,8 @@ def display_analysis_result(analysis_key, table_name, date_col_name):
             mime="text/csv",
         )
     with col_details:
-        if st.button("가성불량 상세 보기", key=f"show_details_{analysis_key}"):
+        # 버튼 키를 'toggle_details'로 변경하여 session_state 변수와 충돌을 피합니다.
+        if st.button("가성불량 상세 보기", key=f"toggle_details_{analysis_key}"):
             st.session_state[f"show_details_{analysis_key}"] = not st.session_state[f"show_details_{analysis_key}"]
             
     if st.session_state.get(f"show_details_{analysis_key}"):
