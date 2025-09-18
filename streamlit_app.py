@@ -1,0 +1,332 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime, date
+import sqlite3
+import warnings
+import numpy as np
+
+warnings.filterwarnings('ignore')
+
+# SQLite 연결 함수
+@st.cache_resource
+def get_connection():
+    try:
+        db_path = "./db/SJ_TM2360E_v2.sqlite3"
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        return conn
+    except Exception as e:
+        st.error(f"데이터베이스 연결에 실패했습니다: {e}")
+        return None
+
+# 데이터베이스에서 테이블을 읽어 DataFrame으로 반환하는 함수
+def read_data_from_db(conn, table_name):
+    try:
+        query = f"SELECT * FROM {table_name}"
+        df = pd.read_sql_query(query, conn)
+        return df
+    except Exception as e:
+        st.error(f"테이블 '{table_name}'에서 데이터를 불러오는 중 오류가 발생했습니다: {e}")
+        return None
+
+# analyze_data 함수
+def analyze_data(df, date_col_name):
+    # PassStatusNorm 컬럼 생성
+    df['PassStatusNorm'] = ""
+    if 'PcbPass' in df.columns:
+        df['PassStatusNorm'] = df['PcbPass'].fillna('').astype(str).str.strip().str.upper()
+    elif 'FwPass' in df.columns:
+        df['PassStatusNorm'] = df['FwPass'].fillna('').astype(str).str.strip().str.upper()
+    elif 'RfTxPass' in df.columns:
+        df['PassStatusNorm'] = df['RfTxPass'].fillna('').astype(str).str.strip().str.upper()
+    elif 'SemiAssyPass' in df.columns:
+        df['PassStatusNorm'] = df['SemiAssyPass'].fillna('').astype(str).str.strip().str.upper()
+    elif 'BatadcPass' in df.columns:
+        df['PassStatusNorm'] = df['BatadcPass'].fillna('').astype(str).str.strip().str.upper()
+
+    summary_data = {}
+    all_dates = []
+
+    jig_col = 'SNumber'
+    if 'PcbMaxIrPwr' in df.columns and not df['PcbMaxIrPwr'].isnull().all():
+        jig_col = 'PcbMaxIrPwr'
+    if 'BatadcStamp' in df.columns and not df['BatadcStamp'].isnull().all():
+        jig_col = 'BatadcStamp'
+    
+    if 'SNumber' in df.columns and date_col_name in df.columns and not df[date_col_name].dt.date.dropna().empty:
+        for jig, group in df.groupby(jig_col):
+            for d, day_group in group.groupby(group[date_col_name].dt.date):
+                if pd.isna(d): continue
+                date_iso = pd.to_datetime(d).strftime("%Y-%m-%d")
+                
+                pass_sns_series = day_group.groupby('SNumber')['PassStatusNorm'].apply(lambda x: 'O' in x.tolist())
+                pass_sns = pass_sns_series[pass_sns_series].index.tolist()
+
+                false_defect_count = len(day_group[(day_group['PassStatusNorm'] == 'X') & (day_group['SNumber'].isin(pass_sns))]['SNumber'].unique())
+                true_defect_count = len(day_group[(day_group['PassStatusNorm'] == 'X') & (~day_group['SNumber'].isin(pass_sns))]['SNumber'].unique())
+                pass_count = len(pass_sns)
+                total_test = len(day_group['SNumber'].unique())
+                fail_count = total_test - pass_count
+
+                if jig not in summary_data:
+                    summary_data[jig] = {}
+                summary_data[jig][date_iso] = {
+                    'total_test': total_test,
+                    'pass': pass_count,
+                    'false_defect': false_defect_count,
+                    'true_defect': true_defect_count,
+                    'fail': fail_count,
+                }
+        all_dates = sorted(list(df[date_col_name].dt.date.dropna().unique()))
+    
+    return summary_data, all_dates
+
+def display_false_defect_details(analysis_key, df_filtered):
+    """
+    가성불량 상세 리스트를 보여주는 함수
+    """
+    st.subheader("가성불량 상세 리스트")
+
+    # 가성불량 SNumber 목록을 다시 계산
+    pass_sns_series = df_filtered.groupby('SNumber')['PassStatusNorm'].apply(lambda x: 'O' in x.tolist())
+    pass_sns = pass_sns_series[pass_sns_series].index.tolist()
+    
+    false_defect_df = df_filtered[
+        (df_filtered['PassStatusNorm'] == 'X') &
+        (df_filtered['SNumber'].isin(pass_sns))
+    ].copy()
+
+    unique_false_defect_sns = false_defect_df['SNumber'].unique()
+
+    if len(unique_false_defect_sns) == 0:
+        st.info("선택된 기간에 가성불량 데이터가 없습니다.")
+        return
+        
+    # 각 분석 키에 맞는 컬럼 선택
+    if analysis_key == 'pcb':
+        cols = ['SNumber', 'PcbSleepCurr', 'PcbIrCurr', 'PcbIrPwr', 'PcbWirelessVolt', 'PcbLed']
+    elif analysis_key == 'fw':
+        cols = ['SNumber']
+    elif analysis_key == 'rftx':
+        cols = ['SNumber', 'RfTxPower']
+    elif analysis_key == 'semi':
+        cols = ['SNumber', 'SemiAssyBatVolt']
+    elif analysis_key == 'func':
+        cols = ['SNumber', 'BatadcLevel']
+    else:
+        st.warning("정의되지 않은 분석 키입니다.")
+        return
+
+    # 필요한 컬럼만 선택하고 중복 제거
+    display_df = false_defect_df[cols].drop_duplicates(subset=['SNumber'])
+    
+    st.dataframe(display_df, use_container_width=True)
+
+
+def display_analysis_result(analysis_key, table_name, date_col_name):
+    if st.session_state.analysis_results[analysis_key].empty:
+        st.warning("선택한 날짜에 해당하는 분석 데이터가 없습니다.")
+        return
+
+    summary_data, all_dates = st.session_state.analysis_data[analysis_key]
+    
+    # 분석 데이터가 비어있을 경우 명확한 경고 메시지를 표시
+    if not summary_data:
+        st.warning("선택한 날짜에 해당하는 분석 데이터가 없습니다.")
+        return
+
+    st.markdown(f"### '{table_name}' 분석 리포트")
+    
+    kor_date_cols = [f"{d.strftime('%y%m%d')}" for d in all_dates]
+    
+    st.write(f"**분석 시간**: {st.session_state.analysis_time[analysis_key]}")
+    st.markdown("---")
+
+    all_reports_text = ""
+    
+    for jig in sorted(summary_data.keys()):
+        st.subheader(f"구분: {jig}")
+        
+        report_data = {
+            '지표': ['총 테스트 수', 'PASS', '가성불량', '진성불량', 'FAIL']
+        }
+        
+        chart_data_rows = []
+
+        for date_iso, date_str in zip([d.strftime('%Y-%m-%d') for d in all_dates], kor_date_cols):
+            data_point = summary_data[jig].get(date_iso)
+            if data_point:
+                report_data[date_str] = [
+                    data_point['total_test'],
+                    data_point['pass'],
+                    data_point['false_defect'],
+                    data_point['true_defect'],
+                    data_point['fail']
+                ]
+                chart_data_rows.append({
+                    '날짜': date_str,
+                    'PASS': data_point['pass'],
+                    'FAIL': data_point['fail'],
+                    '가성불량': data_point['false_defect'],
+                    '진성불량': data_point['true_defect'],
+                })
+            else:
+                report_data[date_str] = ['N/A'] * 5
+                chart_data_rows.append({
+                    '날짜': date_str,
+                    'PASS': 0,
+                    'FAIL': 0,
+                    '가성불량': 0,
+                    '진성불량': 0,
+                })
+
+        report_df = pd.DataFrame(report_data)
+        st.table(report_df)
+        all_reports_text += report_df.to_csv(index=False) + "\n"
+
+        # 시각화 추가
+        chart_df = pd.DataFrame(chart_data_rows)
+        chart_df = chart_df.set_index('날짜')
+
+        if not chart_df.empty:
+            st.markdown("#### 일별 합격/불합격 현황")
+            st.bar_chart(chart_df[['PASS', 'FAIL']])
+            
+            st.markdown("#### 일별 불량 유형 추이")
+            st.line_chart(chart_df[['가성불량', '진성불량']])
+            
+    col_download, col_details = st.columns([0.8, 0.2])
+    with col_download:
+        st.download_button(
+            label="분석 결과 다운로드",
+            data=all_reports_text.encode('utf-8-sig'),
+            file_name=f"{table_name}_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+        )
+    with col_details:
+        # 버튼 키를 'toggle_details'로 변경하여 session_state 변수와 충돌을 피합니다.
+        if st.button("가성불량 상세 보기", key=f"toggle_details_{analysis_key}"):
+            st.session_state[f"show_details_{analysis_key}"] = not st.session_state[f"show_details_{analysis_key}"]
+            
+    if st.session_state.get(f"show_details_{analysis_key}"):
+        display_false_defect_details(analysis_key, st.session_state.analysis_results[analysis_key])
+
+def display_total_summary(df_all_data):
+    """
+    모든 분석 항목의 총 테스트 수를 요약하여 보여주는 함수
+    """
+    st.markdown("### 총 분석 리포트 (전체 기간)")
+    st.markdown("---")
+
+    summary = {
+        '분석 구분': ['PCB', 'FW', 'RfTx', 'SemiAssy', 'Func'],
+        '총 테스트 수': [
+            len(df_all_data['PcbPass'].dropna().unique()),
+            len(df_all_data['FwPass'].dropna().unique()),
+            len(df_all_data['RfTxPass'].dropna().unique()),
+            len(df_all_data['SemiAssyPass'].dropna().unique()),
+            len(df_all_data['BatadcPass'].dropna().unique()),
+        ]
+    }
+    summary_df = pd.DataFrame(summary)
+    st.table(summary_df)
+    st.markdown("---")
+
+
+def main():
+    st.set_page_config(layout="wide")
+    st.title("리모컨 생산 데이터 분석 툴")
+    st.markdown("---")
+
+    conn = get_connection()
+    if conn is None:
+        return
+
+    if 'analysis_results' not in st.session_state:
+        st.session_state.analysis_results = {'pcb': None, 'fw': None, 'rftx': None, 'semi': None, 'func': None}
+    if 'analysis_data' not in st.session_state:
+        st.session_state.analysis_data = {'pcb': None, 'fw': None, 'rftx': None, 'semi': None, 'func': None}
+    if 'analysis_time' not in st.session_state:
+        st.session_state.analysis_time = {'pcb': None, 'fw': None, 'rftx': None, 'semi': None, 'func': None}
+    
+    # 상세 보기 상태를 관리하는 session_state 변수 추가
+    for key in ['pcb', 'fw', 'rftx', 'semi', 'func']:
+        if f"show_details_{key}" not in st.session_state:
+            st.session_state[f"show_details_{key}"] = False
+    
+    try:
+        # 모든 탭에서 공통으로 사용할 원본 데이터를 한 번만 불러옵니다.
+        df_all_data = pd.read_sql_query("SELECT * FROM historyinspection;", conn)
+    except Exception as e:
+        st.error(f"데이터베이스에서 'historyinspection' 테이블을 불러오는 중 오류가 발생했습니다: {e}")
+        return
+
+    # 모든 날짜 관련 컬럼을 datetime 객체로 미리 변환
+    df_all_data['PcbStartTime_dt'] = pd.to_datetime(df_all_data['PcbStartTime'], errors='coerce')
+    df_all_data['FwStamp_dt'] = pd.to_datetime(df_all_data['FwStamp'], errors='coerce')
+    df_all_data['RfTxStamp_dt'] = pd.to_datetime(df_all_data['RfTxStamp'], errors='coerce')
+    df_all_data['SemiAssyStartTime_dt'] = pd.to_datetime(df_all_data['SemiAssyStartTime'], errors='coerce')
+    df_all_data['BatadcStamp_dt'] = pd.to_datetime(df_all_data['BatadcStamp'], errors='coerce')
+
+    # 총 분석 리포트 테이블을 항상 보여줍니다.
+    display_total_summary(df_all_data)
+
+    # 분석 항목 선택 드롭다운
+    analysis_options = {
+        'PCB 분석': 'pcb', 
+        'FW 분석': 'fw', 
+        'RfTx 분석': 'rftx', 
+        'Semi 분석': 'semi', 
+        'Func 분석': 'func'
+    }
+    selected_option = st.selectbox("분석 항목을 선택하세요:", list(analysis_options.keys()))
+    analysis_key = analysis_options[selected_option]
+
+    # 선택된 분석 항목에 따라 필터링 및 분석 로직 실행
+    date_col_map = {
+        'pcb': 'PcbStartTime_dt',
+        'fw': 'FwStamp_dt',
+        'rftx': 'RfTxStamp_dt',
+        'semi': 'SemiAssyStartTime_dt',
+        'func': 'BatadcStamp_dt'
+    }
+    table_name_map = {
+        'pcb': 'Pcb_Process',
+        'fw': 'Fw_Process',
+        'rftx': 'RfTx_Process',
+        'semi': 'SemiAssy_Process',
+        'func': 'Func_Process'
+    }
+    
+    date_col_name = date_col_map[analysis_key]
+    table_name = table_name_map[analysis_key]
+
+    col_date, col_button = st.columns([0.8, 0.2])
+    with col_date:
+        df_dates = df_all_data[date_col_name].dt.date.dropna()
+        min_date = df_dates.min() if not df_dates.empty else date.today()
+        max_date = df_dates.max() if not df_dates.dropna().empty else date.today()
+        selected_dates = st.date_input("날짜 범위 선택", value=(min_date, max_date), key=f"dates_{analysis_key}")
+    with col_button:
+        st.markdown("---")
+        if st.button("분석 실행", key=f"analyze_{analysis_key}"):
+            with st.spinner("데이터 분석 및 저장 중..."):
+                if len(selected_dates) == 2:
+                    start_date, end_date = selected_dates
+                    df_filtered = df_all_data[
+                        (df_all_data[date_col_name].dt.date >= start_date) &
+                        (df_all_data[date_col_name].dt.date <= end_date)
+                    ].copy()
+                else:
+                    st.warning("날짜 범위를 올바르게 선택해주세요.")
+                    df_filtered = pd.DataFrame()
+                
+                st.session_state.analysis_results[analysis_key] = df_filtered
+                st.session_state.analysis_data[analysis_key] = analyze_data(df_filtered, date_col_name)
+                st.session_state.analysis_time[analysis_key] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            st.success("분석 완료! 결과가 저장되었습니다.")
+
+    if st.session_state.analysis_results[analysis_key] is not None:
+        display_analysis_result(analysis_key, table_name, date_col_name)
+
+if __name__ == "__main__":
+    main()
