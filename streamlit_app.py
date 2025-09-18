@@ -81,7 +81,6 @@ def analyze_data(df, date_col_name):
     return summary_data, all_dates
 
 
-# display_analysis_result 함수 수정
 def display_analysis_result(analysis_key, table_name, date_col_name, selected_jig=None):
     if st.session_state.analysis_results[analysis_key].empty:
         st.warning("선택한 날짜에 해당하는 분석 데이터가 없습니다.")
@@ -141,6 +140,34 @@ def display_analysis_result(analysis_key, table_name, date_col_name, selected_ji
         file_name=f"{table_name}_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
     )
+
+    # 상세 내역 표시
+    st.markdown("---")
+    st.subheader("상세 내역")
+    df_filtered = st.session_state.analysis_results[analysis_key]
+    
+    # PASS 상세 내역
+    pass_sns = df_filtered.groupby('SNumber')['PassStatusNorm'].apply(lambda x: 'O' in x.tolist())
+    pass_sns = pass_sns[pass_sns].index.tolist()
+    with st.expander(f"PASS ({len(pass_sns)}건)"):
+        st.text("\n".join(pass_sns))
+    
+    # 가성불량 (False Defect) 상세 내역
+    false_defect_sns = df_filtered[(df_filtered['PassStatusNorm'] == 'X') & (df_filtered['SNumber'].isin(pass_sns))]['SNumber'].unique().tolist()
+    with st.expander(f"가성불량 ({len(false_defect_sns)}건)"):
+        st.text("\n".join(false_defect_sns))
+        
+    # 진성불량 (True Defect) 상세 내역
+    true_defect_sns = df_filtered[(df_filtered['PassStatusNorm'] == 'X') & (~df_filtered['SNumber'].isin(pass_sns))]['SNumber'].unique().tolist()
+    with st.expander(f"진성불량 ({len(true_defect_sns)}건)"):
+        st.text("\n".join(true_defect_sns))
+
+    # FAIL 상세 내역
+    fail_sns = df_filtered['SNumber'].unique().tolist()
+    all_fail_sns = list(set(fail_sns) - set(pass_sns))
+    with st.expander(f"FAIL ({len(all_fail_sns)}건)"):
+        st.text("\n".join(all_fail_sns))
+
 
 def main():
     st.set_page_config(layout="wide")
@@ -220,7 +247,7 @@ def main():
                         st.session_state['last_analyzed_key'] = 'pcb'
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
-            if st.session_state.analysis_results['pcb'] is not None:
+            if st.session_state.analysis_results['pcb'] is not None and st.session_state['last_analyzed_key'] == 'pcb':
                 display_analysis_result('pcb', 'Pcb_Process', 'PcbStartTime_dt',
                                         selected_jig=selected_pc_pcb if selected_pc_pcb != '모든 PC' else None)
 
@@ -258,7 +285,7 @@ def main():
                         st.session_state['last_analyzed_key'] = 'fw'
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
-            if st.session_state.analysis_results['fw'] is not None:
+            if st.session_state.analysis_results['fw'] is not None and st.session_state['last_analyzed_key'] == 'fw':
                 display_analysis_result('fw', 'Fw_Process', 'FwStamp_dt',
                                         selected_jig=selected_pc_fw if selected_pc_fw != '모든 PC' else None)
 
@@ -296,7 +323,7 @@ def main():
                         st.session_state['last_analyzed_key'] = 'rftx'
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
-            if st.session_state.analysis_results['rftx'] is not None:
+            if st.session_state.analysis_results['rftx'] is not None and st.session_state['last_analyzed_key'] == 'rftx':
                 display_analysis_result('rftx', 'RfTx_Process', 'RfTxStamp_dt',
                                         selected_jig=selected_pc_rftx if selected_pc_rftx != '모든 PC' else None)
 
@@ -334,7 +361,7 @@ def main():
                         st.session_state['last_analyzed_key'] = 'semi'
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
-            if st.session_state.analysis_results['semi'] is not None:
+            if st.session_state.analysis_results['semi'] is not None and st.session_state['last_analyzed_key'] == 'semi':
                 display_analysis_result('semi', 'SemiAssy_Process', 'SemiAssyStartTime_dt',
                                         selected_jig=selected_pc_semi if selected_pc_semi != '모든 PC' else None)
 
@@ -372,33 +399,32 @@ def main():
                         st.session_state['last_analyzed_key'] = 'func'
                     st.success("분석 완료! 결과가 저장되었습니다.")
 
-            if st.session_state.analysis_results['func'] is not None:
+            if st.session_state.analysis_results['func'] is not None and st.session_state['last_analyzed_key'] == 'func':
                 display_analysis_result('func', 'Func_Process', 'BatadcStamp_dt',
                                         selected_jig=selected_pc_func if selected_pc_func != '모든 PC' else None)
     
     except Exception as e:
         st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
 
-    # --- 통합 검색 기능 (하단으로 이동) ---
+    # --- SNumber 검색 (하단으로 이동) ---
     st.markdown("---")
-    st.markdown("### 통합 검색")
-    search_query = st.text_input("검색어를 입력하세요 (예: 240531, 100000001 등)", key="search_bar")
+    st.markdown("### SNumber 검색")
+    snumber_query = st.text_input("SNumber를 입력하세요", key="snumber_search_bar")
     
-    if st.button("통합 검색 실행", key="global_search_btn"):
-        if search_query:
-            with st.spinner("전체 데이터에서 검색 중..."):
-                # 모든 컬럼을 문자열로 변환하고 검색어를 포함하는 행 찾기
-                search_df = df_all_data.astype(str)
-                filtered_df = search_df[search_df.apply(
-                    lambda row: row.str.contains(search_query, case=False, na=False).any(),
-                    axis=1
-                )]
+    if st.button("SNumber 검색 실행", key="snumber_search_btn"):
+        if snumber_query:
+            with st.spinner("데이터베이스에서 SNumber 검색 중..."):
+                filtered_df = df_all_data[
+                    df_all_data['SNumber'].fillna('').astype(str).str.contains(snumber_query, case=False, na=False)
+                ]
             
             if not filtered_df.empty:
-                st.success(f"'{search_query}'에 대한 {len(filtered_df)}건의 검색 결과를 찾았습니다.")
+                st.success(f"'{snumber_query}'에 대한 {len(filtered_df)}건의 검색 결과를 찾았습니다.")
                 st.dataframe(filtered_df.reset_index(drop=True))
             else:
-                st.warning(f"'{search_query}'에 대한 검색 결과가 없습니다.")
+                st.warning(f"'{snumber_query}'에 대한 검색 결과가 없습니다.")
+        else:
+            st.warning("SNumber를 입력해주세요.")
     st.markdown("---")
 
     # --- 조회된 DB 확인 (하단으로 이동) ---
@@ -410,6 +436,6 @@ def main():
             st.dataframe(st.session_state.analysis_results[last_key].reset_index(drop=True))
         else:
             st.warning("먼저 탭에서 '분석 실행' 버튼을 눌러 데이터를 분석해주세요.")
-
+            
 if __name__ == "__main__":
     main()
